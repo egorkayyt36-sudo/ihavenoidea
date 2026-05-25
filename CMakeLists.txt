@@ -55,7 +55,10 @@ add_library(tasdll SHARED
     src/console_cli.cpp
 )
 
-target_include_directories(tasdll PRIVATE src)
+target_include_directories(tasdll PRIVATE
+    src
+    ${minhook_SOURCE_DIR}/include
+)
 
 target_link_libraries(tasdll PRIVATE
     imgui_core
