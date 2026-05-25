@@ -194,26 +194,34 @@ bool speedhack_install() {
         seed_anchors_locked();
     }
 
-    bool ok = true;
-    ok &= hook_one(L"kernel32.dll", "QueryPerformanceCounter",
-                   &hk_QueryPerformanceCounter, o_QueryPerformanceCounter);
-    ok &= hook_one(L"kernel32.dll", "GetTickCount",
-                   &hk_GetTickCount, o_GetTickCount);
-    ok &= hook_one(L"kernel32.dll", "GetTickCount64",
-                   &hk_GetTickCount64, o_GetTickCount64);
-    ok &= hook_one(L"kernel32.dll", "GetSystemTimeAsFileTime",
-                   &hk_GetSystemTimeAsFileTime, o_GetSystemTimeAsFileTime);
-    ok &= hook_one(L"kernel32.dll", "GetSystemTimePreciseAsFileTime",
-                   &hk_GetSystemTimePreciseAsFileTime, o_GetSystemTimePreciseAsFileTime);
+    // Resolve once per name. On Windows 7+ many of these are implemented in
+    // kernelbase.dll and re-exported by kernel32.dll. Hooking kernelbase
+    // catches callers that came via api-ms-win-core-* forwarders (Unity / .NET
+    // commonly take that path). Hooking kernel32 catches direct importers.
+    // If kernel32 and kernelbase point at the same address (forwarder), the
+    // second hook attempt is a no-op handled by MinHook.
+    bool any = false;
+    auto try_pair = [&](const char* func, auto detour, auto& out_orig) {
+        if (!out_orig) {
+            if (hook_one(L"kernelbase.dll", func, detour, out_orig)) { any = true; return; }
+        }
+        if (!out_orig) {
+            if (hook_one(L"kernel32.dll", func, detour, out_orig)) any = true;
+        }
+    };
 
-    // winmm may not be loaded yet; ensure it is.
+    try_pair("QueryPerformanceCounter",        &hk_QueryPerformanceCounter,        o_QueryPerformanceCounter);
+    try_pair("GetTickCount",                   &hk_GetTickCount,                   o_GetTickCount);
+    try_pair("GetTickCount64",                 &hk_GetTickCount64,                 o_GetTickCount64);
+    try_pair("GetSystemTimeAsFileTime",        &hk_GetSystemTimeAsFileTime,        o_GetSystemTimeAsFileTime);
+    try_pair("GetSystemTimePreciseAsFileTime", &hk_GetSystemTimePreciseAsFileTime, o_GetSystemTimePreciseAsFileTime);
+
     if (!GetModuleHandleW(L"winmm.dll")) LoadLibraryW(L"winmm.dll");
-    ok &= hook_one(L"winmm.dll", "timeGetTime",
-                   &hk_timeGetTime, o_timeGetTime);
+    if (hook_one(L"winmm.dll", "timeGetTime", &hk_timeGetTime, o_timeGetTime)) any = true;
 
     g_installed = true;
-    log_line("speedhack: install %s", ok ? "ok" : "partial");
-    return ok;
+    log_line("speedhack: install %s", any ? "ok" : "no hooks installed");
+    return any;
 }
 
 void speedhack_uninstall() {

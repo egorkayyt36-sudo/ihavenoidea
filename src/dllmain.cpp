@@ -14,9 +14,9 @@ namespace tasdll {
 
 namespace {
 
-std::thread       g_init_thread;
 std::thread       g_hotkey_thread;
 std::atomic<bool> g_hotkey_running{false};
+HMODULE           g_self_module = nullptr;
 
 std::wstring this_dll_directory() {
     HMODULE h = nullptr;
@@ -71,8 +71,16 @@ void hotkey_loop() {
     }
 }
 
-void init_worker() {
+void init_worker_inner() {
+    OutputDebugStringA("tasdll: init_worker_inner enter\n");
+
+    Sleep(50); // let the loader settle
+
+    OutputDebugStringA("tasdll: after sleep\n");
+
     std::wstring dir = this_dll_directory();
+    OutputDebugStringA("tasdll: got dll directory\n");
+
     log_init(dir + L"\\tasdll.log");
     log_wline(L"tasdll: init in %ls", dir.c_str());
 
@@ -80,18 +88,50 @@ void init_worker() {
         std::lock_guard<std::mutex> lk(state().cfg_mu);
         state().output_dir = default_output_dir();
     }
+    OutputDebugStringA("tasdll: state initialized\n");
 
-    if (!speedhack_install()) {
-        log_line("tasdll: speedhack install reported errors; continuing");
+    bool no_hooks = (GetEnvironmentVariableA("TASDLL_NO_HOOKS", nullptr, 0) != 0);
+    if (no_hooks) {
+        log_line("tasdll: TASDLL_NO_HOOKS set, skipping speedhack install");
+    } else {
+        OutputDebugStringA("tasdll: installing speedhack\n");
+        if (!speedhack_install()) {
+            log_line("tasdll: speedhack install reported errors; continuing");
+        }
+        OutputDebugStringA("tasdll: speedhack done\n");
     }
 
-    gui_start();
-    cli_start();
+    bool no_gui = (GetEnvironmentVariableA("TASDLL_NO_GUI", nullptr, 0) != 0);
+    if (!no_gui) {
+        OutputDebugStringA("tasdll: starting gui\n");
+        gui_start();
+    }
+
+    bool no_cli = (GetEnvironmentVariableA("TASDLL_NO_CLI", nullptr, 0) != 0);
+    if (!no_cli) {
+        OutputDebugStringA("tasdll: starting cli\n");
+        cli_start();
+    }
 
     g_hotkey_running.store(true);
     g_hotkey_thread = std::thread(hotkey_loop);
 
+    OutputDebugStringA("tasdll: ready\n");
     log_line("tasdll: ready");
+}
+
+void init_worker() {
+    __try {
+        init_worker_inner();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        DWORD code = GetExceptionCode();
+        char buf[128];
+        _snprintf_s(buf, sizeof(buf), _TRUNCATE,
+                    "tasdll: SEH exception 0x%08lx in init_worker\n",
+                    (unsigned long)code);
+        OutputDebugStringA(buf);
+        log_line("%s", buf);
+    }
 }
 
 // Detach runs under the loader lock. We must NOT join threads here. Stop the
@@ -107,18 +147,35 @@ void shutdown_minimal() {
     log_shutdown();
 }
 
+// Plain WinAPI entry — avoids the std::thread/CRT path that can crash if
+// invoked from under the loader lock.
+DWORD WINAPI init_thread(LPVOID) {
+    OutputDebugStringA("tasdll: init_thread enter\n");
+    init_worker();
+    OutputDebugStringA("tasdll: init_thread exit\n");
+    return 0;
+}
+
 } // anonymous namespace
 } // namespace tasdll
 
 BOOL APIENTRY DllMain(HMODULE h_module, DWORD reason, LPVOID) {
     switch (reason) {
-    case DLL_PROCESS_ATTACH:
+    case DLL_PROCESS_ATTACH: {
+        OutputDebugStringA("tasdll: DllMain ATTACH\n");
         DisableThreadLibraryCalls(h_module);
-        // Defer all real work onto a worker thread; DllMain must be lean.
-        tasdll::g_init_thread = std::thread(tasdll::init_worker);
-        tasdll::g_init_thread.detach();
+        tasdll::g_self_module = h_module;
+        HANDLE t = CreateThread(nullptr, 0, tasdll::init_thread, nullptr, 0, nullptr);
+        if (t) {
+            CloseHandle(t);
+            OutputDebugStringA("tasdll: CreateThread ok\n");
+        } else {
+            OutputDebugStringA("tasdll: CreateThread FAILED\n");
+        }
         break;
+    }
     case DLL_PROCESS_DETACH:
+        OutputDebugStringA("tasdll: DllMain DETACH\n");
         tasdll::shutdown_minimal();
         break;
     }

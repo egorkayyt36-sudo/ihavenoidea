@@ -17,7 +17,11 @@ FILE* g_file = nullptr;
 void log_init(const std::wstring& path) {
     std::lock_guard<std::mutex> lk(g_mu);
     if (g_file) return;
-    _wfopen_s(&g_file, path.c_str(), L"a+, ccs=UTF-8");
+    // Narrow-mode only. Mixing narrow + wide stdio on the same FILE* is UB
+    // under MSVC and reliably crashed earlier versions of this code on first
+    // write after _wfopen_s with "ccs=UTF-8".
+    _wfopen_s(&g_file, path.c_str(), L"a");
+    OutputDebugStringA("tasdll: log_init done\n");
 }
 
 void log_shutdown() {
@@ -44,7 +48,9 @@ void log_line(const char* fmt, ...) {
 
     std::lock_guard<std::mutex> lk(g_mu);
     if (g_file) {
-        std::fprintf(g_file, "%s%s\n", pfx, body);
+        std::fputs(pfx,  g_file);
+        std::fputs(body, g_file);
+        std::fputs("\n", g_file);
         std::fflush(g_file);
     }
     OutputDebugStringA(pfx);
@@ -53,22 +59,18 @@ void log_line(const char* fmt, ...) {
 }
 
 void log_wline(const wchar_t* fmt, ...) {
-    char pfx[64]; prefix(pfx, sizeof(pfx));
-    wchar_t body[2048];
+    wchar_t wbody[2048];
     va_list ap; va_start(ap, fmt);
-    _vsnwprintf_s(body, _countof(body), _TRUNCATE, fmt, ap);
+    _vsnwprintf_s(wbody, _countof(wbody), _TRUNCATE, fmt, ap);
     va_end(ap);
 
-    std::lock_guard<std::mutex> lk(g_mu);
-    if (g_file) {
-        std::fprintf(g_file, "%s", pfx);
-        std::fputws(body, g_file);
-        std::fputws(L"\n", g_file);
-        std::fflush(g_file);
+    char body[4096];
+    int n = WideCharToMultiByte(CP_UTF8, 0, wbody, -1, body, (int)sizeof(body), nullptr, nullptr);
+    if (n <= 0) {
+        body[0] = '?';
+        body[1] = 0;
     }
-    OutputDebugStringA(pfx);
-    OutputDebugStringW(body);
-    OutputDebugStringW(L"\n");
+    log_line("%s", body);
 }
 
 } // namespace tasdll
