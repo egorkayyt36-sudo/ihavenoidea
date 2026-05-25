@@ -194,7 +194,24 @@ void draw_ui() {
     ImGui::End();
 }
 
+void thread_main_inner();
+
 void thread_main() {
+    __try {
+        thread_main_inner();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        DWORD code = GetExceptionCode();
+        char buf[128];
+        _snprintf_s(buf, sizeof(buf), _TRUNCATE,
+                    "tasdll: gui SEH exception 0x%08lx\n",
+                    (unsigned long)code);
+        OutputDebugStringA(buf);
+        log_line("%s", buf);
+    }
+}
+
+void thread_main_inner() {
+    OutputDebugStringA("tasdll: gui thread enter\n");
     WNDCLASSEXW wc{};
     wc.cbSize        = sizeof(wc);
     wc.style         = CS_HREDRAW | CS_VREDRAW;
