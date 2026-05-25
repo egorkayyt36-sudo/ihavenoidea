@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(tasdll LANGUAGES CXX)
+project(tasdll LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,8 +20,21 @@ FetchContent_Declare(
     minhook
     GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
     GIT_TAG        v1.3.3
+    SOURCE_SUBDIR  __skip_upstream_cmake__
 )
 FetchContent_MakeAvailable(minhook)
+
+add_library(minhook STATIC
+    ${minhook_SOURCE_DIR}/src/buffer.c
+    ${minhook_SOURCE_DIR}/src/hook.c
+    ${minhook_SOURCE_DIR}/src/trampoline.c
+    ${minhook_SOURCE_DIR}/src/hde/hde32.c
+    ${minhook_SOURCE_DIR}/src/hde/hde64.c
+)
+target_include_directories(minhook
+    PUBLIC  ${minhook_SOURCE_DIR}/include
+    PRIVATE ${minhook_SOURCE_DIR}/src
+)
 
 FetchContent_Declare(
     imgui
