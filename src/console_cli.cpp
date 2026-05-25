@@ -35,6 +35,7 @@ void print_help() {
         "  out <dir>        set output directory\n"
         "  show|hide        toggle GUI window\n"
         "  status           show current settings\n"
+        "  stats            speedhack hook hit-counts (verify hooks fire)\n"
         "  help             print this\n"
         "  quit             exit CLI loop\n");
 }
@@ -70,6 +71,7 @@ void process_line(const char* line) {
 
     if (_stricmp(cmd, "help") == 0) { print_help(); return; }
     if (_stricmp(cmd, "status") == 0) { print_status(); return; }
+    if (_stricmp(cmd, "stats") == 0) { std::fputs(speedhack_stats().c_str(), stdout); return; }
     if (_stricmp(cmd, "speed") == 0) {
         double v = atof(rest);
         if (v <= 0.0) { std::puts("speed must be > 0"); return; }

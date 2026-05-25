@@ -191,6 +191,12 @@ void draw_ui() {
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Text("Hotkeys: F8 toggle GUI  |  F9 toggle record  |  Ctrl+[ slower  |  Ctrl+] faster  |  Ctrl+\\ reset");
+
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("Speedhack hook stats")) {
+        std::string stats = speedhack_stats();
+        ImGui::TextUnformatted(stats.c_str());
+    }
     ImGui::End();
 }
 

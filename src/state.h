@@ -18,7 +18,7 @@ struct State {
     std::wstring        ffmpeg_path;
     int                 capture_fps{60};
     bool                capture_audio{false};
-    bool                use_desktop{false};
+    bool                use_desktop{true};   // safe default: capture whole desktop
 };
 
 State& state();
