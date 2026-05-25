@@ -14,9 +14,9 @@ namespace tasdll {
 
 namespace {
 
-std::thread       g_init_thread;
 std::thread       g_hotkey_thread;
 std::atomic<bool> g_hotkey_running{false};
+HMODULE           g_self_module = nullptr;
 
 std::wstring this_dll_directory() {
     HMODULE h = nullptr;
@@ -72,6 +72,11 @@ void hotkey_loop() {
 }
 
 void init_worker() {
+    // Give the loader a moment to finish whatever brought us in. This avoids
+    // a class of races where an injector resumes the host process right as we
+    // try to allocate trampolines / spawn windows.
+    Sleep(50);
+
     std::wstring dir = this_dll_directory();
     log_init(dir + L"\\tasdll.log");
     log_wline(L"tasdll: init in %ls", dir.c_str());
@@ -107,17 +112,26 @@ void shutdown_minimal() {
     log_shutdown();
 }
 
+// Plain WinAPI entry — avoids the std::thread/CRT path that can crash if
+// invoked from under the loader lock.
+DWORD WINAPI init_thread(LPVOID) {
+    init_worker();
+    return 0;
+}
+
 } // anonymous namespace
 } // namespace tasdll
 
 BOOL APIENTRY DllMain(HMODULE h_module, DWORD reason, LPVOID) {
     switch (reason) {
-    case DLL_PROCESS_ATTACH:
+    case DLL_PROCESS_ATTACH: {
         DisableThreadLibraryCalls(h_module);
-        // Defer all real work onto a worker thread; DllMain must be lean.
-        tasdll::g_init_thread = std::thread(tasdll::init_worker);
-        tasdll::g_init_thread.detach();
+        tasdll::g_self_module = h_module;
+        // CreateThread + plain function pointer is the safe pattern from DllMain.
+        HANDLE t = CreateThread(nullptr, 0, tasdll::init_thread, nullptr, 0, nullptr);
+        if (t) CloseHandle(t);
         break;
+    }
     case DLL_PROCESS_DETACH:
         tasdll::shutdown_minimal();
         break;
